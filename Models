@@ -17,104 +17,75 @@ import numpy as np
 import matplotlib.pyplot as plt
 from sklearn.metrics import auc
 from sklearn.model_selection import learning_curve
-
 from sklearn.model_selection import cross_val_score
 
+# Import Dataframe
 df = pd.read_csv("/content/Final_psycho_google_3.csv")
-
-csv.info()
-
 msno.matrix(df)
 
+# Data Preparation
 df[df["RSI*MASSON"].notnull()]
-
 df["Time"] = pd.to_datetime(df["Time"])
 df  = df[df["Time"]>pd.to_datetime("2001-10-31")]
-
 df.isna().sum()
-
-
-
-# Diviser les données en variables indépendantes (X) et dépendantes (y)
 X = df[['Dollar Index','Gold','Close', 'VIX', 'US Bonds 10y']]
-# 'MASSON',        
-#'Economic_recovery', 'Economic_stimulus', 'Unemployment_Insurance']]
 y = df['Crisis']
 y = y.replace({'Crisis': 0, 'No_Crisis': 1})
 
-# Diviser les données en ensembles d'entraînement et de test
+# Train/ Test/ Split
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-# Régression logistique
+# LOGISTIC REGRESSION
 logreg = LogisticRegression()
 logreg.fit(X_train, y_train)
 logreg_predictions = logreg.predict(X_test)
 logreg_accuracy = accuracy_score(y_test, logreg_predictions)
 print("Régression logistique - Précision :", logreg_accuracy)
-
 # Classification report
 print("Rapport de classification - Régression logistique:")
 print(classification_report(y_test, logreg_predictions))
-
-# Matrice de confusion
+# Confusion Matrix
 print("Matrice de confusion - Régression logistique:")
 print(confusion_matrix(y_test, logreg_predictions))
-
 # Calculer les scores de probabilité pour les classes positives
 y_pred_prob = logreg.predict_proba(X_test)[:, 1]
-
-# Calculer l'AUC-ROC
+# AUC-ROC Cruve
 auc_roc = roc_auc_score(y_test, y_pred_prob)
 
-print("Aire sous la courbe ROC (AUC-ROC) :", auc_roc)
-
-# Random Forest
+# RANDOM FOREST
 rf = RandomForestClassifier()
 rf.fit(X_train, y_train)
 rf_predictions = rf.predict(X_test)
-
-
-
 rf_accuracy = accuracy_score(y_test, rf_predictions)
 print("Random Forest - Précision :", rf_accuracy)
-
 # Classification report
 print("Rapport de classification - Régression logistique:")
 print(classification_report(y_test, rf_predictions))
-
 # Matrice de confusion
 print("Matrice de confusion - Régression logistique:")
 print(confusion_matrix(y_test, rf_predictions))
-
 # Calculer les scores de probabilité pour les classes positives
 y_pred_prob = rf.predict_proba(X_test)[:, 1]
-
 # Calculer l'AUC-ROC
 auc_roc = roc_auc_score(y_test, y_pred_prob)
-
 print("Aire sous la courbe ROC (AUC-ROC) :", auc_roc)
 
-# AdaBoost
+# ADABOOST
 adaboost = AdaBoostClassifier()
 adaboost.fit(X_train, y_train)
 adaboost_predictions = adaboost.predict(X_test)
 adaboost_accuracy = accuracy_score(y_test, adaboost_predictions)
 print("AdaBoost - Précision :", adaboost_accuracy)
-
 # Classification report
 print("Rapport de classification - Régression logistique:")
 print(classification_report(y_test, adaboost_predictions))
-
 # Matrice de confusion
 print("Matrice de confusion - Régression logistique:")
 print(confusion_matrix(y_test, adaboost_predictions))
-
 # Calculer les scores de probabilité pour les classes positives
 y_pred_prob = adaboost.predict_proba(X_test)[:, 1]
-
 # Calculer l'AUC-ROC
 auc_roc = roc_auc_score(y_test, y_pred_prob)
-
 print("Aire sous la courbe ROC (AUC-ROC) :", auc_roc)
 
 # XGBoost
@@ -123,192 +94,16 @@ xgboost.fit(X_train, y_train)
 xgboost_predictions = xgboost.predict(X_test)
 xgboost_accuracy = accuracy_score(y_test, xgboost_predictions)
 print("XGBoost - Précision :", xgboost_accuracy)
-
 # Classification report
 print("Rapport de classification - Régression logistique:")
 print(classification_report(y_test, xgboost_predictions))
-
 # Matrice de confusion
 print("Matrice de confusion - Régression logistique:")
 print(confusion_matrix(y_test, xgboost_predictions))
-
 # Calculer les scores de probabilité pour les classes positives
 y_pred_prob = xgboost.predict_proba(X_test)[:, 1]
-
 # Calculer l'AUC-ROC
 auc_roc = roc_auc_score(y_test, y_pred_prob)
-
 print("Aire sous la courbe ROC (AUC-ROC) :", auc_roc)
-
-
-
-
-
-
-
-# Instancier le suréchantillonneur aléatoire
-oversampler = RandomOverSampler(random_state=42)
-
-# Appliquer l'oversampling sur les données d'entraînement
-X_train_oversampled, y_train_oversampled = oversampler.fit_resample(X_train, y_train)
-
-# Régression logistique
-logreg = LogisticRegression()
-logreg.fit(X_train_oversampled, y_train_oversampled)
-logreg_predictions = logreg.predict(X_test)
-logreg_accuracy = accuracy_score(y_test, logreg_predictions)
-print("Régression logistique - Précision :", logreg_accuracy)
-
-
-# Classification report
-print("Rapport de classification - Régression logistique:")
-print(classification_report(y_test, logreg_predictions))
-
-# Matrice de confusion
-print("Matrice de confusion - Régression logistique:")
-print(confusion_matrix(y_test, logreg_predictions))
-
-# Calculer les scores de probabilité pour les classes positives
-y_pred_prob = logreg.predict_proba(X_test)[:, 1]
-
-# Calculer l'AUC-ROC
-auc_roc = roc_auc_score(y_test, y_pred_prob)
-
-print("Aire sous la courbe ROC (AUC-ROC) :", auc_roc)
-
-
-
-
-
-
-# Effectuer une validation croisée avec 5 folds
-scores = cross_val_score(rf, X_train, y_train, cv=5, scoring='accuracy')
-
-# Afficher les scores de chaque fold
-print("Scores de validation croisée :", scores)
-
-# Calculer la précision moyenne
-mean_accuracy = scores.mean()
-print("Précision moyenne :", mean_accuracy)
-
-
-
-
-
-
-
-# Calculer les scores d'apprentissage et de validation croisée
-train_sizes, train_scores, test_scores = learning_curve(rf, X_train_oversampled, y_train_oversampled, cv=5, scoring='accuracy')
-
-# Calculer les moyennes et les écarts types des scores d'apprentissage et de validation
-train_mean = np.mean(train_scores, axis=1)
-train_std = np.std(train_scores, axis=1)
-test_mean = np.mean(test_scores, axis=1)
-test_std = np.std(test_scores, axis=1)
-
-# Tracer la courbe d'apprentissage
-plt.figure(figsize=(10, 6))
-plt.plot(train_sizes, train_mean, 'o-', color='b', label='Entraînement')
-plt.plot(train_sizes, test_mean, 'o-', color='r', label='Validation')
-
-# Ajouter les intervalles de confiance
-plt.fill_between(train_sizes, train_mean - train_std, train_mean + train_std, alpha=0.1, color='b')
-plt.fill_between(train_sizes, test_mean - test_std, test_mean + test_std, alpha=0.1, color='r')
-
-# Paramètres du graphe
-plt.title("Courbe d'apprentissage - Random Forest")
-plt.xlabel("Taille de l'échantillon d'entraînement")
-plt.ylabel("Score d'exactitude")
-plt.legend(loc='best')
-plt.grid(True)
-
-# Afficher la courbe d'apprentissage
-plt.show()
-
-# Instancier le modèle Random Forest
-rf = RandomForestClassifier()
-
-# Utiliser les données d'entraînement suréchantillonnées pour ajuster le modèle
-rf.fit(X_train_oversampled, y_train_oversampled)
-
-# Utiliser le modèle pour faire des prédictions sur les données de test
-rf_predictions = rf.predict(X_test)
-
-
-
-rf_accuracy = accuracy_score(y_test, rf_predictions)
-print("Random Forest - Précision :", rf_accuracy)
-
-# Classification report
-print("Rapport de classification - Régression logistique:")
-print(classification_report(y_test, rf_predictions))
-
-# Matrice de confusion
-print("Matrice de confusion - Régression logistique:")
-print(confusion_matrix(y_test, rf_predictions))
-
-# Calculer les scores de probabilité pour les classes positives
-y_pred_prob = rf.predict_proba(X_test)[:, 1]
-
-# Calculer l'AUC-ROC
-auc_roc = roc_auc_score(y_test, y_pred_prob)
-
-print("Aire sous la courbe ROC (AUC-ROC) :", auc_roc)
-
-# Instancier le modèle AdaBoost
-adaboost = AdaBoostClassifier()
-
-# Utiliser les données d'entraînement suréchantillonnées pour ajuster le modèle
-adaboost.fit(X_train_oversampled, y_train_oversampled)
-
-# Utiliser le modèle pour faire des prédictions sur les données de test
-adaboost_predictions = adaboost.predict(X_test)
-
-
-
-# Classification report
-print("Rapport de classification - Régression logistique:")
-print(classification_report(y_test, adaboost_predictions))
-
-# Matrice de confusion
-print("Matrice de confusion - Régression logistique:")
-print(confusion_matrix(y_test, adaboost_predictions))
-
-# Calculer les scores de probabilité pour les classes positives
-y_pred_prob = adaboost.predict_proba(X_test)[:, 1]
-
-# Calculer l'AUC-ROC
-auc_roc = roc_auc_score(y_test, y_pred_prob)
-
-print("Aire sous la courbe ROC (AUC-ROC) :", auc_roc)
-
-xgboost = xgb.XGBClassifier()
-
-# Utiliser les données d'entraînement suréchantillonnées pour ajuster le modèle
-xgboost.fit(X_train_oversampled, y_train_oversampled)
-
-# Utiliser le modèle pour faire des prédictions sur les données de test
-xgboost_predictions = xgboost.predict(X_test)
-
-
-# Classification report
-print("Rapport de classification - Régression logistique:")
-print(classification_report(y_test, xgboost_predictions))
-
-# Matrice de confusion
-print("Matrice de confusion - Régression logistique:")
-print(confusion_matrix(y_test, xgboost_predictions))
-
-# Calculer les scores de probabilité pour les classes positives
-y_pred_prob = xgboost.predict_proba(X_test)[:, 1]
-
-# Calculer l'AUC-ROC
-auc_roc = roc_auc_score(y_test, y_pred_prob)
-
-print("Aire sous la courbe ROC (AUC-ROC) :", auc_roc)
-
-
-
-
 
 
