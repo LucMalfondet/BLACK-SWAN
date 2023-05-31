@@ -1,0 +1,586 @@
+# -*- coding: utf-8 -*-
+import pandas as pd
+import yfinance as yf
+import matplotlib.pyplot as plt
+import missingno as msno
+import ta
+import numpy as np
+import matplotlib.patches as patches
+import numpy as np
+from pandas_market_calendars import get_calendar
+import seaborn as sns
+
+
+# Getting stocks market data
+symbols = ['CL=F', 'DX-Y.NYB', '^DJI', 'GC=F', '^IXIC', '^VIX', '^TNX']
+names = ['Oil WTI', 'Dollar Index','Gold','Dow Jones', 'Nasdaq', 'US Bonds 10y','VIX']
+data = yf.download(symbols, start='1998-09-04', end='2023-05-19', progress=False)
+close_data = data['Close']
+close_data.columns = names
+df = pd.concat([close_data,df], axis=1)
+
+# Filling missing values
+for i in close_data.columns:
+  df[i] = df[i].interpolate(method='polynomial', order=3)
+
+# Calculate the Moving Average
+df['S&P 1100 MMS 200'] = df['Close'].rolling(window='1100D', min_periods=1).mean()
+df['S&P 500 MMS 200'] = df['Close'].rolling(window='500D', min_periods=1).mean()
+df['S&P 1300 MMS 200'] = df['Close'].rolling(window='1300D', min_periods=1).mean()
+df['S&P 1400 MMS 200'] = df['Close'].rolling(window='1400D', min_periods=1).mean()
+
+# Calculate the RSI Monthly
+close_prices = df['Close']
+close_prices = close_prices.reset_index()
+close_prices.columns = ['Date','Close']
+close_prices['Date'] = pd.to_datetime(close_prices['Date'])
+monthly_close = close_prices.groupby(pd.Grouper(key='Date', freq='M')).last()
+rsi = ta.momentum.RSIIndicator(monthly_close['Close'], window=14)
+monthly_close['RSI'] = rsi.rsi()
+monthly_close['RSI_SMA_Diff'] = monthly_close['RSI'].rolling(window=5).mean()
+
+# Control RSI Monthly with chart
+plt.figure(figsize=(16,9))
+plt.plot(monthly_close.index, monthly_close["RSI"])
+plt.plot(monthly_close.index, monthly_close['RSI_SMA_Diff'], color='green', label='RSI - RSI SMA')
+plt.axhline(y=50, color='red', linestyle='--')
+plt.axhline(y=0, color='red', linestyle='--')
+# Defining crisis zones
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('RSI')
+plt.title('RSI CHart)
+plt.show()
+
+# Convert monthly dataframe to daily dataframe
+df_daily = monthly_close.resample('D').asfreq()
+df_daily
+msno.matrix(df_daily)
+for i in df_daily.columns:
+  df_daily[i] = df_daily[i].interpolate()
+msno.matrix(df_daily)
+
+# Delete week-ends and days off
+def filter_trading_days(dataframe):
+    calendar = get_calendar('NYSE')
+    dates = dataframe.index
+    valid_trading_days_mask = np.array([calendar.valid_days(start_date, end_date).shape[0] > 0 for start_date, end_date in zip(dates, dates)])
+    filtered_dataframe = dataframe[valid_trading_days_mask]
+    return filtered_dataframe
+df_daily = filter_trading_days(df_daily)
+msno.matrix(df_daily)
+
+elements_non_communs = df.index.symmetric_difference(df_daily.index)
+lignes_manquantes = df[~df.index.isin(df_daily.index)]
+df_daily = pd.concat([df_daily, lignes_manquantes])
+msno.matrix(df_daily)
+df_daily.isna().sum()
+for i in df_daily.columns:
+  df_daily[i] = df_daily[i].interpolate()
+msno.matrix(df_daily)
+df["RSI Monthly"] = df_daily["RSI"]
+df["RSI_SMA_Diff"] = df_daily["RSI_SMA_Diff"]
+
+# Calculate satisfaction ratio
+def calculer_ratio_satisfaction(data):
+    ratios_satisfaction = []
+    for i in range(len(data)):
+        if i < 252:
+            ratio_satisfaction = np.nan
+        else:
+            subset = data.iloc[i-252:i]
+            satisfied_actor = 0
+            unsatisfied_actor = 0
+            for k in range(len(subset)):
+                sub_subset = subset.iloc[k:len(subset)]
+                highest = sub_subset['Close'].max()
+                lowest = sub_subset['Close'].min()
+                mean = (highest + lowest) / 2
+                if sub_subset.iloc[-1]['Close'] >= mean:
+                    satisfied_actor += 1
+                else:
+                    unsatisfied_actor += 1
+            ratio_satisfaction = satisfied_actor / (satisfied_actor + unsatisfied_actor) - 0.5
+        ratios_satisfaction.append(ratio_satisfaction)
+    return ratios_satisfaction
+ratios_satisfaction = calculer_ratio_satisfaction(df)
+df["MASSON"] = ratios_satisfaction
+
+# Control satisfatcion ratio with chart
+# Créer un seul graphique avec deux axes y
+fig, ax1 = plt.subplots(figsize=(15, 8))
+ax2 = ax1.twinx()
+ax1.plot(df.index, df['Close'], color='blue')
+ax1.set_ylabel('Cours du S&P 500', color='blue')
+ax1.tick_params('y', colors='blue')
+ax2.plot(df.index, ratios_satisfaction, color='red', alpha=0.5)
+ax2.set_ylabel('Ratio de Satisfaction', color='red', alpha=0.5)
+ax2.tick_params('y', colors='red')
+ax2.axhline(0, color='red', linestyle='--')
+for i in range(1, len(ratios_satisfaction)):
+    if (ratios_satisfaction[i-1] < 0 and ratios_satisfaction[i] >= 0) or (ratios_satisfaction[i-1] >= 0 and ratios_satisfaction[i] < 0):
+        ax2.axvline(df.index[i], color='black', linestyle='dotted')
+plt.title('Cours du S&P 500 avec le Ratio de Satisfaction')
+plt.show()
+plt.figure(figsize=(16,9))
+plt.plot(df.index, df["MASSON"])
+plt.axhline(y=0, color='red', linestyle='--')
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('RSI')
+plt.title('Graphique du RSI avec une ligne à zéro')
+plt.show()
+
+# Chart with ratio satisfaction for each class 
+crisis_data = df[df['Crisis'] == 'Crisis']
+no_crisis_data = df[df['Crisis'] == 'No_Crisis']
+plt.figure(figsize=(16, 9))
+plt.scatter(no_crisis_data.index, no_crisis_data['MASSON'], color='blue', label='No Crisis', marker='o', s=2)
+plt.scatter(crisis_data.index, crisis_data['MASSON'], color='red', label='Crisis', marker='o', s=2)
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('S&P 500')
+plt.title("SP500 Performance: Crisis Zones and Stable Zones")
+plt.legend()
+plt.show()
+df["RSI*MASSON"] = df["RSI Monthly"]*df["MASSON"]
+plt.figure(figsize=(16,9))
+plt.plot(df.index, df["RSI*MASSON"])
+plt.axhline(y=50, color='red', linestyle='--')
+plt.axhline(y=0, color='red', linestyle='--')
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('RSI')
+plt.title('Graphique du RSI avec une ligne à zéro')
+plt.show()
+
+def feature_optimizer(df):
+  for i in range(len(df)):
+    if (df["RSI Monthly"].iloc[i]>50) & (df["RSI*MASSON"].iloc[i]<0):
+      df["RSI*MASSON"].iloc[i]*=-1
+  return df
+df = feature_optimizer(df)
+
+plt.figure(figsize=(16,9))
+plt.plot(df.index, df["RSI*MASSON"])
+plt.axhline(y=50, color='red', linestyle='--')
+plt.axhline(y=0, color='red', linestyle='--')
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('RSI')
+plt.title('Graphique du RSI avec une ligne à zéro')
+plt.show()
+
+def feature_optimizer_5(data):
+    difference = data["Close"] - data["S&P 1100 MMS 200"]
+    data.loc[(difference > 0) & (data["RSI*MASSON"] < 0), "RSI*MASSON"] *= -1
+    return data
+df = feature_optimizer_5(df)
+plt.figure(figsize=(16,9))
+plt.plot(df.index, df["RSI*MASSON"])
+plt.axhline(y=50, color='red', linestyle='--')
+plt.axhline(y=0, color='red', linestyle='--')
+# Configurer les labels et le titre du graphique
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('RSI')
+plt.title('Graphique du RSI avec une ligne à zéro')
+plt.show()
+
+def feature_optimizer_6(data):
+    difference = data["Close"] - data["S&P 500 MMS 200"]
+    data.loc[(difference > 0) & (data["RSI*MASSON"] < 0), "RSI*MASSON"] *= -1
+    return data
+
+df = feature_optimizer_6(df)
+plt.figure(figsize=(16,9))
+plt.plot(df.index, df["RSI*MASSON"])
+plt.axhline(y=50, color='red', linestyle='--')
+plt.axhline(y=0, color='red', linestyle='--')
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('RSI')
+plt.title('Graphique du RSI avec une ligne à zéro')
+plt.show()
+
+def feature_optimizer_7(data):
+    difference = data["Close"] - data["S&P 1400 MMS 200"]
+    data.loc[(difference > 0) & (data["RSI*MASSON"] < 0), "RSI*MASSON"] *= -1
+    data.loc[(difference < 0) & (data["RSI*MASSON"] < 0), "RSI*MASSON"] -= 30
+    return data
+df = feature_optimizer_7(df)
+plt.figure(figsize=(16,9))
+plt.plot(df.index, df["RSI*MASSON"])
+plt.axhline(y=50, color='red', linestyle='--')
+plt.axhline(y=0, color='red', linestyle='--')
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('RSI')
+plt.title('Graphique du RSI avec une ligne à zéro')
+plt.show()
+crisis_data = df[df['Crisis'] == 'Crisis']
+no_crisis_data = df[df['Crisis'] == 'No_Crisis']
+plt.figure(figsize=(16, 9))
+plt.scatter(no_crisis_data.index, no_crisis_data['RSI*MASSON'], color='blue', label='No Crisis', marker='o', s=2)
+plt.scatter(crisis_data.index, crisis_data['RSI*MASSON'], color='red', label='Crisis', marker='o', s=2)
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('S&P 500')
+plt.title("SP500 Performance: Crisis Zones and Stable Zones")
+plt.legend()
+plt.show()
+class_0_data = df[df['Crisis'] == 'No_Crisis']['RSI*MASSON']
+class_1_data = df[df['Crisis'] == 'Crisis']['RSI*MASSON']
+sns.histplot(class_0_data, bins=10, color='blue', label='No_Crisis', kde=True)
+sns.histplot(class_1_data, bins=10, color='red', label='Crisis', kde=True)
+plt.xlabel('Continuous Value')
+plt.ylabel('Frequency')
+plt.title('Distribution of RSI*MASSON Values by Class')
+plt.legend()
+plt.show()
+
+
+# VIX FEATURE ENGINEERING
+plt.figure(figsize=(16,9))
+plt.plot(df.index, df["Gold"])
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('RSI')
+plt.title('Graphique du RSI avec une ligne à zéro')
+plt.show()
+crisis_data = df[df['Crisis'] == 'Crisis']
+no_crisis_data = df[df['Crisis'] == 'No_Crisis']
+plt.figure(figsize=(16, 9))
+plt.scatter(no_crisis_data.index, no_crisis_data['VIX'], color='blue', label='No Crisis', marker='o', s=2)
+plt.scatter(crisis_data.index, crisis_data['VIX'], color='red', label='Crisis', marker='o', s=2)
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('S&P 500')
+plt.title("SP500 Performance: Crisis Zones and Stable Zones")
+plt.legend()
+plt.show()
+
+df["VIX_Engineered"] = df["VIX"]
+def VIX_Feature_Engineering(data):
+    difference_500 = data["Close"] - data["S&P 500 MMS 200"]
+    difference_1100 = data["Close"] - data["S&P 1100 MMS 200"]
+    difference_1300 = data["Close"] - data["S&P 1300 MMS 200"]
+    difference_1400 = data["Close"] - data["S&P 1400 MMS 200"]
+    data.loc[(difference_500 > 0) | (difference_1100 > 0) | (difference_1300 > 0)| (difference_1400 > 0), "VIX_Engineered"] -= 50
+    return data
+    
+df = VIX_Feature_Engineering(df)
+plt.figure(figsize=(16, 9))
+plt.plot(df.index, df['VIX'], label='VIX')
+plt.plot(df.index, df['VIX_Engineered'], label='VIX Engineered')
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('Prix')
+plt.title('Cours du VIX avec Moyenne Mobile 21 et Écart à la Moyenne')
+plt.legend()
+plt.grid(True)
+plt.show()
+crisis_data = df[df['Crisis'] == 'Crisis']
+no_crisis_data = df[df['Crisis'] == 'No_Crisis']
+plt.figure(figsize=(16, 9))
+plt.scatter(no_crisis_data.index, no_crisis_data['VIX_Engineered'], color='blue', label='No Crisis', marker='o', s=2)
+plt.scatter(crisis_data.index, crisis_data['VIX_Engineered'], color='red', label='Crisis', marker='o', s=2)
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('S&P 500')
+plt.title("SP500 Performance: Crisis Zones and Stable Zones")
+plt.legend()
+plt.show()
+class_0_data = df[df['Crisis'] == 'No_Crisis']['VIX_Engineered']
+class_1_data = df[df['Crisis'] == 'Crisis']['VIX_Engineered']
+sns.histplot(class_0_data, bins=10, color='blue', label='No_Crisis', kde=True)
+sns.histplot(class_1_data, bins=10, color='red', label='Crisis', kde=True)
+plt.xlabel('Continuous Value')
+plt.ylabel('Frequency')
+plt.title('Distribution of VIX_Engineered Values by Class')
+plt.legend()
+plt.show()
+
+# GOLD FEATURE ENGINEERING
+crisis_data = df[df['Crisis'] == 'Crisis']
+no_crisis_data = df[df['Crisis'] == 'No_Crisis']
+plt.figure(figsize=(16, 9))
+plt.scatter(no_crisis_data.index, no_crisis_data['Gold'], color='blue', label='No Crisis', marker='o', s=2)
+plt.scatter(crisis_data.index, crisis_data['Gold'], color='red', label='Crisis', marker='o', s=2)
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('S&P 500')
+plt.title("SP500 Performance: Crisis Zones and Stable Zones")
+plt.legend()
+plt.show()
+
+#  df['Gold daily_Return'] = dg['Gold'].rolling(window=30).std()
+df['Correlation_SP500'] = df['Gold'].rolling(window=30).corr(df['US Bonds 10y'])
+crisis_data = df[df['Crisis'] == 'Crisis']
+no_crisis_data = df[df['Crisis'] == 'No_Crisis']
+plt.figure(figsize=(16, 9))
+plt.scatter(no_crisis_data.index, no_crisis_data['Correlation_SP500'], color='blue', label='No Crisis', marker='o', s=2)
+plt.scatter(crisis_data.index, crisis_data['Correlation_SP500'], color='red', label='Crisis', marker='o', s=2)
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+plt.xlabel('Date')
+plt.ylabel('S&P 500')
+plt.title("SP500 Performance: Crisis Zones and Stable Zones")
+plt.legend()
+plt.show()
+
+# DOLLAR INDEX
+plt.figure(figsize=(16,9))
+plt.plot(df.index, df['Dollar Index'])
+plt.axhline(y=0, color='red', linestyle='--')
+crisis_zones = [
+    {'start': '2001-09-01', 'end': '2003-04-04', 'label': 'Crise 1'},
+    {'start': '2008-06-01', 'end': '2009-03-03', 'label': 'Crise 2'},
+    {'start': '2020-03-01', 'end': '2020-04-10', 'label': 'Crise 3'}
+]
+for zone in crisis_zones:
+    start_date = pd.to_datetime(zone['start'])
+    end_date = pd.to_datetime(zone['end'])
+    rect = patches.Rectangle((start_date, plt.ylim()[0]), end_date - start_date, plt.ylim()[1]-plt.ylim()[0],
+                             linewidth=1, edgecolor='black', facecolor='none', linestyle='dashed')
+    plt.gca().add_patch(rect)
+
+    # Positionner l'annotation au milieu de la zone de crise
+    annotation_x = start_date + (end_date - start_date) / 2
+    annotation_y = plt.ylim()[1] - (plt.ylim()[1] - plt.ylim()[0]) * 0.1
+    
+    # Ajouter l'annotation avec le nom de la crise
+    plt.text(annotation_x, annotation_y, zone['label'], ha='center', va='center')
+
+plt.show()
+
+df.to_csv("Final_psycho_dataframe.csv")
+
+# GOOGLE TREND FEATURE ENGINERRING
+list_file = ["/content/Economic_recovery.csv",
+              "/content/Economic_stimulus.csv",
+              "/content/Job_loss.csv",
+              "/content/Liquidity.csv",
+              "/content/Recession.csv",
+              "/content/Stock_market.csv",
+              "/content/Unemployment_Insurance.csv"]
+names = ["Economic_recovery",
+          "Economic_stimulus",
+          "Job_loss",
+          "Liquidity",
+          "Recession",
+          "Stock_market",
+          "Unemployment_Insurance"]
+dg = pd.DataFrame({})
+for i,k in zip(list_file, names):
+  data = pd.read_csv(i)
+  print(data)
+  plt.figure()
+  plt.plot(data.index,data[data.columns[1]])
+  plt.show()
+  data = data.rename(columns={data.columns[1]:k})
+  dg = pd.concat([dg, data[data.columns[1]]], axis = 1)
+dg = pd.concat([dg, data[data.columns[0]]], axis = 1)
+dg = dg.rename(columns={data.columns[0]:"Time"})
+dg = dg.set_index("Time")
+dg = filter_trading_days(dg)
+dg = dg.reset_index()
+df = df.reset_index()
+df = df.rename(columns={"Date":"Time"})
+merged_df = df.merge(dg, left_index=True, right_index=True, how='inner')
+merged_df.to_csv("Final_psycho_google.csv")
+merged_df.isna().sum()
